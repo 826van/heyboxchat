@@ -568,10 +568,30 @@
       element.getAttribute("aria-label") || "",
       element.getAttribute("title") || "",
       element.getAttribute("placeholder") || "",
+      element.getAttribute("href") || "",
       element.getAttribute("role") || "",
       element.className || "",
       element.id || ""
     ].join(" "));
+  }
+
+  function linkTarget(element) {
+    const link = element.closest?.("a[href]");
+    if (!link) return null;
+    try {
+      return new URL(link.getAttribute("href") || link.href, location.href);
+    } catch {
+      return null;
+    }
+  }
+
+  function isForbiddenCommentTrigger(element) {
+    const text = interactionText(element);
+    const target = linkTarget(element);
+    if (target && target.origin !== location.origin) return true;
+    if (/beian|mps\.gov|公安|备案|协议|隐私|帮助|举报|投诉|download|下载/i.test(text)) return true;
+    if (/搜索|search|分享|收藏|点赞|关注|发布|发送|submit|send/i.test(text)) return true;
+    return false;
   }
 
   function clickableAncestor(element) {
@@ -589,7 +609,7 @@
         /comment|reply|input|interact|chat/.test(String(current.className || ""))
       );
       const compactEnough = rect.width <= 560 && rect.height <= 140;
-      if (interactive && compactEnough) return current;
+      if (interactive && compactEnough && !isForbiddenCommentTrigger(current)) return current;
       current = current.parentElement;
     }
     return element;
@@ -602,7 +622,7 @@
 
     const text = interactionText(element);
     if (!text) return 0;
-    if (/搜索|search|分享|收藏|点赞|关注|发布|发送|submit|send/i.test(text)) return 0;
+    if (isForbiddenCommentTrigger(element)) return 0;
 
     let score = 0;
     if (/说点什么|说点|写评论|添加评论|发表评论|我来说|友善的评论/i.test(text)) score += 120;
@@ -614,6 +634,7 @@
     if (getComputedStyle(element).cursor === "pointer") score += 18;
     if (rect.y > window.innerHeight * 0.48) score += 10;
     if (rect.width <= 420 && rect.height <= 90) score += 8;
+    if (element.matches("a")) score -= 35;
     return score;
   }
 
@@ -625,7 +646,9 @@
       '[role="textbox"]',
       'button',
       '[role="button"]',
-      'a',
+      'a[href^="#"]',
+      'a[href^="/"]',
+      'a[href*="xiaohongshu.com"]',
       '[tabindex]',
       '[class*="comment"]',
       '[class*="reply"]',
@@ -642,7 +665,7 @@
       .filter((element) => {
         if (seen.has(element)) return false;
         seen.add(element);
-        return true;
+        return !isForbiddenCommentTrigger(element);
       })
       .map((element) => ({ element, score: commentTriggerScore(element) }))
       .filter((item) => item.score > 0)
@@ -651,18 +674,25 @@
   }
 
   function dispatchClickSequence(element) {
+    if (isForbiddenCommentTrigger(element)) return false;
+    const beforeOrigin = location.origin;
     element.scrollIntoView({ block: "center", behavior: "smooth" });
     for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
       element.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
     }
     element.click();
+    if (location.origin !== beforeOrigin) {
+      history.back();
+      return false;
+    }
+    return true;
   }
 
   function clickCommentTrigger() {
     const triggers = findCommentTriggers().slice(0, 3);
     if (!triggers.length) return false;
     for (const trigger of triggers) {
-      dispatchClickSequence(trigger);
+      if (!dispatchClickSequence(trigger)) continue;
       if (findCommentInput()) return true;
     }
     return true;
