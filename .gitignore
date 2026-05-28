@@ -1,0 +1,4 @@
+debug-scripts/
+*.log
+.DS_Store
+Thumbs.db
