@@ -22,6 +22,7 @@
     collecting: false,
     prefillRunning: false,
     prefillTimer: null,
+    pendingDraftCache: null,
     lastScanNewNotes: 0,
     lastScanMatches: 0
   };
@@ -499,7 +500,7 @@
   function isCommentInput(element) {
     if (isInsideHelper(element)) return false;
     const rect = element.getBoundingClientRect();
-    if (rect.width < 120 || rect.height < 16) return false;
+    if (rect.width < 80 || rect.height < 12) return false;
     if (element.disabled || element.readOnly) return false;
 
     const text = normalizeText([
@@ -512,10 +513,11 @@
     ].join(" "));
 
     if (/搜索|search|私信|昵称|验证码|手机号|密码/i.test(text)) return false;
-    if (/发布|发送|submit|send/i.test(text)) return false;
+    if (/发布|发送|submit|send|搜索|search|私信|昵称|验证码|手机号|密码/i.test(text)) return false;
     if (/评论|回复|comment|reply|说点|输入|互动|comment-input|reply-input|editor|contenteditable/i.test(text)) return true;
-    if (element.matches("textarea, input")) return /comment|reply/i.test(`${element.name || ""} ${element.id || ""}`);
-    return element.isContentEditable && rect.height >= 18;
+    if (element.matches("textarea")) return true;
+    if (element.matches("input")) return /comment|reply|input|editor/i.test(`${element.name || ""} ${element.id || ""} ${element.className || ""}`);
+    return element.isContentEditable && rect.height >= 12;
   }
 
   function findCommentInput() {
@@ -700,6 +702,7 @@
 
   function fillInput(element, text) {
     element.focus();
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
     if ("value" in element) {
       element.value = text;
       element.dispatchEvent(new Event("input", { bubbles: true }));
@@ -721,9 +724,38 @@
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  function copyTextToClipboard(text) {
+    try {
+      return navigator.clipboard.writeText(text);
+    } catch {
+      return Promise.resolve(false);
+    }
+  }
+
+  async function getAnyPendingDraft() {
+    const pending = await loadPendingDraft() || await waitForNotePageFromPending();
+    if (pending) state.pendingDraftCache = pending;
+    return pending || state.pendingDraftCache;
+  }
+
+  async function tryFillFocusedEditor() {
+    const pending = await getAnyPendingDraft();
+    if (!pending) return false;
+
+    const active = document.activeElement;
+    const input = active && isCommentInput(active) ? active : findCommentInput();
+    if (!input) return false;
+
+    fillInput(input, pending.text);
+    setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
+    await clearPendingDraft();
+    state.pendingDraftCache = null;
+    return true;
+  }
+
   async function prefillPendingDraft() {
     if (state.prefillRunning) return;
-    const pending = await loadPendingDraft() || await waitForNotePageFromPending();
+    const pending = await getAnyPendingDraft();
     if (!pending) return;
 
     state.prefillRunning = true;
@@ -735,6 +767,7 @@
           fillInput(input, pending.text);
           setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
           await clearPendingDraft();
+          state.pendingDraftCache = null;
           return;
         }
 
@@ -746,6 +779,7 @@
             fillInput(input, pending.text);
             setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
             await clearPendingDraft();
+            state.pendingDraftCache = null;
             return;
           }
         }
@@ -756,7 +790,8 @@
         await sleep(500);
       }
 
-      setStatus("没找到评论框，草稿已复制过；你可以手动粘贴后再发布。");
+      await copyTextToClipboard(pending.text);
+      setStatus("评论框没自动展开，草稿已复制。你手动点一下评论框；插件会继续尝试预填，或直接 Ctrl+V。");
     } finally {
       state.prefillRunning = false;
     }
@@ -789,6 +824,16 @@
         }
       });
     }
+  }
+
+  function watchManualEditorFocus() {
+    const trySoon = () => {
+      setTimeout(() => tryFillFocusedEditor(), 80);
+      setTimeout(() => tryFillFocusedEditor(), 450);
+    };
+    document.addEventListener("focusin", trySoon, true);
+    document.addEventListener("click", trySoon, true);
+    document.addEventListener("input", trySoon, true);
   }
 
   async function openKeywordSearch() {
@@ -1040,6 +1085,7 @@
   createPanel();
   scanLoadedNotes();
   watchRouteChangesForPrefill();
+  watchManualEditorFocus();
   schedulePrefillPendingDraft(0);
 
   const observer = new MutationObserver(scheduleScan);
