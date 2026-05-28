@@ -20,6 +20,8 @@
     seenNotes: new Map(),
     scanTimer: null,
     collecting: false,
+    prefillRunning: false,
+    prefillTimer: null,
     lastScanNewNotes: 0,
     lastScanMatches: 0
   };
@@ -510,7 +512,8 @@
     ].join(" "));
 
     if (/搜索|search|私信|昵称|验证码|手机号|密码/i.test(text)) return false;
-    if (/评论|回复|comment|reply|说点|输入|互动/i.test(text)) return true;
+    if (/发布|发送|submit|send/i.test(text)) return false;
+    if (/评论|回复|comment|reply|说点|输入|互动|comment-input|reply-input|editor|contenteditable/i.test(text)) return true;
     if (element.matches("textarea, input")) return /comment|reply/i.test(`${element.name || ""} ${element.id || ""}`);
     return element.isContentEditable && rect.height >= 18;
   }
@@ -520,9 +523,18 @@
       "textarea",
       'input[type="text"]',
       'input:not([type])',
+      '[placeholder*="评论"]',
+      '[placeholder*="说点"]',
       '[contenteditable="true"]',
       '[role="textbox"]',
-      ".ProseMirror"
+      ".ProseMirror",
+      ".ql-editor",
+      '[class*="comment"][contenteditable]',
+      '[class*="reply"][contenteditable]',
+      '[class*="input"][contenteditable]',
+      '[class*="editor"][contenteditable]',
+      '[class*="comment-input"] [contenteditable]',
+      '[class*="reply-input"] [contenteditable]'
     ];
 
     const fields = selectors
@@ -537,33 +549,122 @@
     return fields[0] || null;
   }
 
-  function isCommentTrigger(element) {
-    if (isInsideHelper(element)) return false;
+  function visibleRect(element) {
     const rect = element.getBoundingClientRect();
-    if (rect.width < 24 || rect.height < 18) return false;
+    const visible = (
+      rect.width >= 20 &&
+      rect.height >= 16 &&
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth
+    );
+    return visible ? rect : null;
+  }
 
-    const text = normalizeText([
+  function interactionText(element) {
+    return normalizeText([
       element.innerText || element.textContent || "",
       element.getAttribute("aria-label") || "",
       element.getAttribute("title") || "",
-      element.className || ""
+      element.getAttribute("placeholder") || "",
+      element.getAttribute("role") || "",
+      element.className || "",
+      element.id || ""
     ].join(" "));
-
-    if (/搜索|search|分享|收藏|点赞|关注/i.test(text)) return false;
-    return /评论|回复|comment|reply|说点|输入|我来说/i.test(text);
   }
 
-  function findCommentTrigger() {
-    return [
-      ...document.querySelectorAll('button, [role="button"], a, div, span')
-    ].find(isCommentTrigger) || null;
+  function clickableAncestor(element) {
+    let current = element;
+    for (let depth = 0; depth < 5 && current && current !== document.body; depth += 1) {
+      const rect = visibleRect(current);
+      if (!rect) {
+        current = current.parentElement;
+        continue;
+      }
+      const style = getComputedStyle(current);
+      const interactive = (
+        current.matches('button, [role="button"], a, [tabindex], input, textarea, [contenteditable="true"]') ||
+        style.cursor === "pointer" ||
+        /comment|reply|input|interact|chat/.test(String(current.className || ""))
+      );
+      const compactEnough = rect.width <= 560 && rect.height <= 140;
+      if (interactive && compactEnough) return current;
+      current = current.parentElement;
+    }
+    return element;
+  }
+
+  function commentTriggerScore(element) {
+    if (isInsideHelper(element)) return false;
+    const rect = visibleRect(element);
+    if (!rect) return 0;
+
+    const text = interactionText(element);
+    if (!text) return 0;
+    if (/搜索|search|分享|收藏|点赞|关注|发布|发送|submit|send/i.test(text)) return 0;
+
+    let score = 0;
+    if (/说点什么|说点|写评论|添加评论|发表评论|我来说|友善的评论/i.test(text)) score += 120;
+    if (/评论输入|评论框|回复输入|comment-input|reply-input|input-box|comment-editor|editor/i.test(text)) score += 95;
+    if (/展开评论|查看.*评论|全部评论|评论区/i.test(text)) score += 75;
+    if (/评论|回复|comment|reply/i.test(text)) score += 45;
+    if (/chat|message|interact/i.test(text)) score += 22;
+    if (element.matches('button, [role="button"], a, [tabindex]')) score += 18;
+    if (getComputedStyle(element).cursor === "pointer") score += 18;
+    if (rect.y > window.innerHeight * 0.48) score += 10;
+    if (rect.width <= 420 && rect.height <= 90) score += 8;
+    return score;
+  }
+
+  function findCommentTriggers() {
+    const selectors = [
+      'textarea',
+      'input[type="text"]',
+      '[contenteditable="true"]',
+      '[role="textbox"]',
+      'button',
+      '[role="button"]',
+      'a',
+      '[tabindex]',
+      '[class*="comment"]',
+      '[class*="reply"]',
+      '[class*="input"]',
+      '[class*="interact"]',
+      '[class*="chat"]',
+      'div',
+      'span'
+    ].join(",");
+
+    const seen = new Set();
+    return [...document.querySelectorAll(selectors)]
+      .map((element) => clickableAncestor(element))
+      .filter((element) => {
+        if (seen.has(element)) return false;
+        seen.add(element);
+        return true;
+      })
+      .map((element) => ({ element, score: commentTriggerScore(element) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.element);
+  }
+
+  function dispatchClickSequence(element) {
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
+      element.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+    }
+    element.click();
   }
 
   function clickCommentTrigger() {
-    const trigger = findCommentTrigger();
-    if (!trigger) return false;
-    trigger.scrollIntoView({ block: "center", behavior: "smooth" });
-    trigger.click();
+    const triggers = findCommentTriggers().slice(0, 3);
+    if (!triggers.length) return false;
+    for (const trigger of triggers) {
+      dispatchClickSequence(trigger);
+      if (findCommentInput()) return true;
+    }
     return true;
   }
 
@@ -591,26 +692,73 @@
   }
 
   async function prefillPendingDraft() {
+    if (state.prefillRunning) return;
     const pending = await loadPendingDraft() || await waitForNotePageFromPending();
     if (!pending) return;
 
+    state.prefillRunning = true;
     setStatus("检测到待填评论，正在查找评论框。不会自动发送。");
-    for (let attempt = 0; attempt < 36; attempt += 1) {
-      const input = findCommentInput();
-      if (input) {
-        fillInput(input, pending.text);
-        setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
-        await clearPendingDraft();
-        return;
-      }
-      if (attempt === 3 || attempt === 9 || attempt === 18) clickCommentTrigger();
-      if (attempt === 6 || attempt === 14 || attempt === 24) {
-        window.scrollBy({ top: Math.max(window.innerHeight * 0.7, 480), behavior: "smooth" });
-      }
-      await sleep(500);
-    }
+    try {
+      for (let attempt = 0; attempt < 44; attempt += 1) {
+        let input = findCommentInput();
+        if (input) {
+          fillInput(input, pending.text);
+          setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
+          await clearPendingDraft();
+          return;
+        }
 
-    setStatus("没找到评论框，草稿已复制过；你可以手动粘贴后再发布。");
+        if (attempt === 0 || attempt % 3 === 0) {
+          clickCommentTrigger();
+          await sleep(220);
+          input = findCommentInput();
+          if (input) {
+            fillInput(input, pending.text);
+            setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
+            await clearPendingDraft();
+            return;
+          }
+        }
+
+        if (attempt === 6 || attempt === 14 || attempt === 24 || attempt === 34) {
+          window.scrollBy({ top: Math.max(window.innerHeight * 0.45, 360), behavior: "smooth" });
+        }
+        await sleep(500);
+      }
+
+      setStatus("没找到评论框，草稿已复制过；你可以手动粘贴后再发布。");
+    } finally {
+      state.prefillRunning = false;
+    }
+  }
+
+  function schedulePrefillPendingDraft(delay = 500) {
+    clearTimeout(state.prefillTimer);
+    state.prefillTimer = setTimeout(() => {
+      prefillPendingDraft();
+    }, delay);
+  }
+
+  function watchRouteChangesForPrefill() {
+    const wrap = (method) => {
+      const original = history[method];
+      history[method] = function wrappedHistoryMethod(...args) {
+        const result = original.apply(this, args);
+        schedulePrefillPendingDraft(350);
+        return result;
+      };
+    };
+    wrap("pushState");
+    wrap("replaceState");
+    window.addEventListener("popstate", () => schedulePrefillPendingDraft(350));
+
+    if (globalThis.chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === "local" && changes[STORAGE_PENDING_DRAFT]?.newValue) {
+          schedulePrefillPendingDraft(150);
+        }
+      });
+    }
   }
 
   async function openKeywordSearch() {
@@ -861,7 +1009,8 @@
 
   createPanel();
   scanLoadedNotes();
-  prefillPendingDraft();
+  watchRouteChangesForPrefill();
+  schedulePrefillPendingDraft(0);
 
   const observer = new MutationObserver(scheduleScan);
   observer.observe(document.body, { childList: true, subtree: true });
