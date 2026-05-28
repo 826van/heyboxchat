@@ -38,6 +38,15 @@
   color: #4b5563;
 }
 
+.xhh-keyword-helper-field {
+  margin: 8px 0;
+}
+
+.xhh-keyword-helper-label {
+  margin-bottom: 4px;
+  color: #4b5563;
+}
+
 .xhh-keyword-helper-panel textarea {
   width: 100%;
   box-sizing: border-box;
@@ -49,6 +58,52 @@
   color: #1f2328;
   background: #fff;
   font: inherit;
+}
+
+.xhh-keyword-helper-drafts {
+  display: grid;
+  gap: 8px;
+}
+
+.xhh-keyword-helper-draft {
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.xhh-keyword-helper-draft-head,
+.xhh-keyword-helper-draft-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.xhh-keyword-helper-draft-head span {
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.xhh-keyword-helper-draft-head button {
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+.xhh-keyword-helper-draft textarea {
+  min-height: 76px;
+  margin-top: 0;
+}
+
+.xhh-keyword-helper-draft-tools {
+  margin: -2px 0 8px;
+}
+
+.xhh-keyword-helper-draft-tools button {
+  width: 100%;
 }
 
 .xhh-keyword-helper-row {
@@ -160,6 +215,8 @@
 }
 
 .xhh-keyword-helper-panel-collapsed label,
+.xhh-keyword-helper-panel-collapsed .xhh-keyword-helper-field,
+.xhh-keyword-helper-panel-collapsed .xhh-keyword-helper-draft-tools,
 .xhh-keyword-helper-panel-collapsed .xhh-keyword-helper-row,
 .xhh-keyword-helper-panel-collapsed .xhh-keyword-helper-actions,
 .xhh-keyword-helper-panel-collapsed .xhh-keyword-helper-summary,

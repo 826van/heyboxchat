@@ -4,15 +4,17 @@
 
   const STORAGE_KEYWORDS = "xhhKeywordHelperKeywords";
   const STORAGE_DRAFT = "xhhKeywordHelperDraft";
+  const STORAGE_DRAFTS = "xhhKeywordHelperDrafts";
   const STORAGE_MAX_STEPS = "xhhKeywordHelperMaxSteps";
   const STORAGE_PENDING_DRAFT = "xhhKeywordHelperPendingDraft";
 
   const defaultKeywords = ["买", "求推荐", "合适", "多少钱"];
-  const defaultDraft = "看情况回一句，发之前先确认帖子内容是否真的相关。";
+  const defaultDrafts = ["看情况回一句，发之前先确认帖子内容是否真的相关。"];
+  const defaultDraft = defaultDrafts[0];
 
   const state = {
     keywords: loadList(STORAGE_KEYWORDS, defaultKeywords),
-    draft: localStorage.getItem(STORAGE_DRAFT) || defaultDraft,
+    drafts: loadDrafts(),
     maxSteps: Number(localStorage.getItem(STORAGE_MAX_STEPS) || 12),
     matches: new Map(),
     seenPosts: new Map(),
@@ -39,7 +41,8 @@
 
   function saveSettings() {
     localStorage.setItem(STORAGE_KEYWORDS, JSON.stringify(state.keywords));
-    localStorage.setItem(STORAGE_DRAFT, state.draft);
+    localStorage.setItem(STORAGE_DRAFTS, JSON.stringify(state.drafts));
+    localStorage.setItem(STORAGE_DRAFT, state.drafts[0] || defaultDraft);
     localStorage.setItem(STORAGE_MAX_STEPS, String(state.maxSteps));
   }
 
@@ -47,15 +50,33 @@
     return (value || "").replace(/\s+/g, " ").trim();
   }
 
-  function parseDrafts(value) {
+  function normalizeDraft(value) {
     return (value || "")
-      .split(/\n+/)
-      .map(normalizeText)
-      .filter(Boolean);
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function loadDrafts() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_DRAFTS) || "null");
+      if (Array.isArray(stored)) {
+        const drafts = stored.map(normalizeDraft).filter(Boolean);
+        if (drafts.length) return drafts;
+      }
+    } catch {
+      // Fall through to the legacy single-draft value.
+    }
+
+    const legacyDraft = normalizeDraft(localStorage.getItem(STORAGE_DRAFT) || "");
+    return legacyDraft ? [legacyDraft] : defaultDrafts;
   }
 
   function pickRandomDraft() {
-    const drafts = parseDrafts(state.draft);
+    const drafts = state.drafts.map(normalizeDraft).filter(Boolean);
     if (!drafts.length) return "";
     return drafts[Math.floor(Math.random() * drafts.length)];
   }
@@ -609,10 +630,13 @@
         关键词
         <textarea data-xhh-helper-keywords rows="3" spellcheck="false"></textarea>
       </label>
-      <label>
-        评论草稿（每行一条，随机抽取）
-        <textarea data-xhh-helper-draft rows="5"></textarea>
-      </label>
+      <div class="xhh-keyword-helper-field">
+        <div class="xhh-keyword-helper-label">评论草稿池</div>
+        <div data-xhh-helper-drafts class="xhh-keyword-helper-drafts"></div>
+      </div>
+      <div class="xhh-keyword-helper-draft-tools">
+        <button type="button" data-xhh-helper-add-draft>新增草稿</button>
+      </div>
       <div class="xhh-keyword-helper-row">
         <label>
           采集页数
@@ -633,7 +657,7 @@
     document.documentElement.append(panel);
 
     panel.querySelector("[data-xhh-helper-keywords]").value = state.keywords.join("\n");
-    panel.querySelector("[data-xhh-helper-draft]").value = state.draft;
+    renderDraftEditors();
     panel.querySelector("[data-xhh-helper-max-steps]").value = state.maxSteps;
 
     panel.querySelector("[data-xhh-helper-save]").addEventListener("click", () => {
@@ -656,6 +680,12 @@
       collectMorePosts();
     });
     panel.querySelector("[data-xhh-helper-search]").addEventListener("click", openKeywordSearch);
+    panel.querySelector("[data-xhh-helper-add-draft]").addEventListener("click", () => {
+      const nextDrafts = readDraftEditors({ keepBlank: true });
+      nextDrafts.push("");
+      setDraftsForRender(nextDrafts);
+      renderDraftEditors();
+    });
     panel.querySelector("[data-xhh-helper-stop]").addEventListener("click", stopCollecting);
     panel.querySelector("[data-xhh-helper-toggle]").addEventListener("click", () => {
       panel.classList.toggle("xhh-keyword-helper-panel-collapsed");
@@ -664,13 +694,68 @@
 
   function readSettingsFromPanel() {
     const keywordInput = document.querySelector("[data-xhh-helper-keywords]");
-    const draftInput = document.querySelector("[data-xhh-helper-draft]");
     const maxStepsInput = document.querySelector("[data-xhh-helper-max-steps]");
 
     state.keywords = parseKeywords(keywordInput?.value || "").slice(0, 80);
     if (!state.keywords.length) state.keywords = defaultKeywords;
-    state.draft = (draftInput?.value || "").trim() || defaultDraft;
+    state.drafts = readDraftEditors();
+    if (!state.drafts.length) state.drafts = defaultDrafts;
     state.maxSteps = Math.min(80, Math.max(1, Number(maxStepsInput?.value || 12)));
+  }
+
+  function readDraftEditors(options = {}) {
+    const { keepBlank = false } = options;
+    const drafts = [...document.querySelectorAll("[data-xhh-helper-draft]")]
+      .map((input) => normalizeDraft(input.value));
+    if (keepBlank) return drafts;
+    return drafts.filter(Boolean);
+  }
+
+  function getRenderableDrafts() {
+    return state.drafts.length ? state.drafts : [""];
+  }
+
+  function setDraftsForRender(drafts) {
+    state.drafts = drafts.length ? drafts : [""];
+  }
+
+  function renderDraftEditors() {
+    const container = document.querySelector("[data-xhh-helper-drafts]");
+    if (!container) return;
+
+    const drafts = getRenderableDrafts();
+    container.innerHTML = "";
+    drafts.forEach((draft, index) => {
+      const item = document.createElement("div");
+      item.className = "xhh-keyword-helper-draft";
+
+      const head = document.createElement("div");
+      head.className = "xhh-keyword-helper-draft-head";
+
+      const title = document.createElement("span");
+      title.textContent = `草稿 ${index + 1}`;
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "删除";
+      remove.disabled = drafts.length === 1;
+      remove.addEventListener("click", () => {
+        const nextDrafts = readDraftEditors({ keepBlank: true });
+        nextDrafts.splice(index, 1);
+        setDraftsForRender(nextDrafts);
+        renderDraftEditors();
+      });
+
+      const textarea = document.createElement("textarea");
+      textarea.rows = 4;
+      textarea.dataset.xhhHelperDraft = "";
+      textarea.value = draft;
+      textarea.placeholder = "这里可以写多行评论内容";
+
+      head.append(title, remove);
+      item.append(head, textarea);
+      container.append(item);
+    });
   }
 
   function resetMatches() {
