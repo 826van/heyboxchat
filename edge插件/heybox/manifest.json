@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Xiaoheihe Keyword Helper",
+  "version": "0.1.0",
+  "description": "Find keyword-matching posts on xiaoheihe.cn and prepare manual comment drafts.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.xiaoheihe.cn/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

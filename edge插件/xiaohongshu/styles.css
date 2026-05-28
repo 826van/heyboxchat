@@ -1,0 +1,226 @@
+.xhs-keyword-helper-panel {
+  position: fixed;
+  z-index: 2147483647;
+  top: 88px;
+  right: 20px;
+  width: 320px;
+  max-height: calc(100vh - 120px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(22, 24, 35, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 40px rgba(22, 24, 35, 0.18);
+  color: #1f2328;
+  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.xhs-keyword-helper-head,
+.xhs-keyword-helper-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.xhs-keyword-helper-head {
+  margin-bottom: 10px;
+}
+
+.xhs-keyword-helper-panel strong {
+  font-size: 14px;
+}
+
+.xhs-keyword-helper-panel label {
+  display: block;
+  margin: 8px 0;
+  color: #4b5563;
+}
+
+.xhs-keyword-helper-field {
+  margin: 8px 0;
+}
+
+.xhs-keyword-helper-label {
+  margin-bottom: 4px;
+  color: #4b5563;
+}
+
+.xhs-keyword-helper-panel textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  resize: vertical;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 7px;
+  color: #1f2328;
+  background: #fff;
+  font: inherit;
+}
+
+.xhs-keyword-helper-drafts {
+  display: grid;
+  gap: 8px;
+}
+
+.xhs-keyword-helper-draft {
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.xhs-keyword-helper-draft-head,
+.xhs-keyword-helper-draft-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.xhs-keyword-helper-draft-head span {
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.xhs-keyword-helper-draft-head button {
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+.xhs-keyword-helper-draft textarea {
+  min-height: 76px;
+  margin-top: 0;
+}
+
+.xhs-keyword-helper-draft-tools {
+  margin: -2px 0 8px;
+}
+
+.xhs-keyword-helper-draft-tools button {
+  width: 100%;
+}
+
+.xhs-keyword-helper-row {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+
+.xhs-keyword-helper-row label {
+  flex: 1;
+}
+
+.xhs-keyword-helper-panel input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 7px;
+  color: #1f2328;
+  background: #fff;
+  font: inherit;
+}
+
+.xhs-keyword-helper-panel button {
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 6px 9px;
+  background: #f6f8fa;
+  color: #1f2328;
+  cursor: pointer;
+  font: inherit;
+}
+
+.xhs-keyword-helper-panel button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.xhs-keyword-helper-panel button:hover {
+  background: #eef2f6;
+}
+
+.xhs-keyword-helper-status,
+.xhs-keyword-helper-summary,
+.xhs-keyword-helper-empty {
+  margin: 8px 0 0;
+  color: #697386;
+}
+
+.xhs-keyword-helper-summary {
+  color: #1f2328;
+  font-weight: 600;
+}
+
+.xhs-keyword-helper-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.xhs-keyword-helper-item {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.xhs-keyword-helper-item a {
+  color: #0969da;
+  text-decoration: none;
+}
+
+.xhs-keyword-helper-item a:hover {
+  text-decoration: underline;
+}
+
+.xhs-keyword-helper-item span {
+  color: #697386;
+  font-size: 12px;
+}
+
+.xhs-keyword-helper-item p {
+  margin: 0;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.xhs-keyword-helper-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.xhs-keyword-helper-item-actions button {
+  flex: 1;
+}
+
+.xhs-keyword-helper-match {
+  outline: 2px solid #ff2442 !important;
+  outline-offset: 2px !important;
+  border-radius: 6px !important;
+}
+
+.xhs-keyword-helper-panel-collapsed {
+  width: auto;
+  overflow: hidden;
+}
+
+.xhs-keyword-helper-panel-collapsed label,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-field,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-draft-tools,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-row,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-actions,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-summary,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-status,
+.xhs-keyword-helper-panel-collapsed .xhs-keyword-helper-list {
+  display: none;
+}
