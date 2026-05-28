@@ -3,6 +3,9 @@
   "name": "Xiaohongshu Keyword Helper",
   "version": "0.1.0",
   "description": "Find keyword-matching notes on xiaohongshu.com and prepare manual comment drafts.",
+  "permissions": [
+    "storage"
+  ],
   "content_scripts": [
     {
       "matches": [

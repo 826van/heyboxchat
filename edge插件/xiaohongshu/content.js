@@ -89,11 +89,44 @@
 
   function noteKeyFromUrl(url) {
     const parsed = new URL(url, location.href);
-    const exploreMatch = parsed.pathname.match(/\/explore\/([^/?#]+)/);
-    if (exploreMatch) return `explore:${exploreMatch[1]}`;
-    const itemMatch = parsed.pathname.match(/\/discovery\/item\/([^/?#]+)/);
-    if (itemMatch) return `item:${itemMatch[1]}`;
+    const noteMatch = parsed.pathname.match(/\/(?:explore|discovery\/item|search_result)\/([^/?#]+)/);
+    if (noteMatch) return `note:${noteMatch[1]}`;
     return `${parsed.origin}${parsed.pathname}`;
+  }
+
+  function extensionStorageAvailable() {
+    return Boolean(globalThis.chrome?.storage?.local);
+  }
+
+  function setExtensionStorage(key, value) {
+    if (!extensionStorageAvailable()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [key]: value }, () => {
+        resolve(!chrome.runtime?.lastError);
+      });
+    });
+  }
+
+  function getExtensionStorage(key) {
+    if (!extensionStorageAvailable()) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      chrome.storage.local.get(key, (result) => {
+        if (chrome.runtime?.lastError) {
+          resolve(null);
+          return;
+        }
+        resolve(result?.[key] || null);
+      });
+    });
+  }
+
+  function removeExtensionStorage(key) {
+    if (!extensionStorageAvailable()) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      chrome.storage.local.remove(key, () => {
+        resolve(!chrome.runtime?.lastError);
+      });
+    });
   }
 
   function isInsideHelper(node) {
@@ -372,12 +405,15 @@
       return;
     }
 
-    localStorage.setItem(STORAGE_PENDING_DRAFT, JSON.stringify({
+    const pendingDraft = {
       key: match.key,
       url: match.url,
       text,
       createdAt: Date.now()
-    }));
+    };
+    localStorage.setItem(STORAGE_PENDING_DRAFT, JSON.stringify(pendingDraft));
+    const opened = window.open("about:blank", "_blank");
+    await setExtensionStorage(STORAGE_PENDING_DRAFT, pendingDraft);
 
     try {
       await navigator.clipboard.writeText(text);
@@ -385,26 +421,77 @@
       // Clipboard can be blocked by the browser; localStorage still carries the draft.
     }
 
-    const opened = window.open(match.url, "_blank");
-    if (!opened) {
+    if (opened) {
+      try {
+        opened.location.replace(match.url);
+      } catch {
+        opened.location.href = match.url;
+      }
+    } else {
       location.href = match.url;
     }
     setStatus("已打开笔记并准备预填。最后发布仍需要你在笔记页手动确认。");
   }
 
-  function loadPendingDraft() {
+  function shouldRemovePendingDraft(pending) {
+    return Boolean(
+      pending &&
+      (!pending.text || !pending.createdAt || Date.now() - pending.createdAt > 15 * 60 * 1000)
+    );
+  }
+
+  function validatePendingDraft(pending) {
+    if (!pending || shouldRemovePendingDraft(pending)) return null;
+
+    const currentKey = noteKeyFromUrl(location.href);
+    if (pending.key && pending.key !== currentKey) return null;
+    if (pending.url && noteKeyFromUrl(pending.url) !== currentKey) return null;
+    return pending;
+  }
+
+  async function clearPendingDraft() {
+    localStorage.removeItem(STORAGE_PENDING_DRAFT);
+    await removeExtensionStorage(STORAGE_PENDING_DRAFT);
+  }
+
+  async function loadPendingDraft() {
     try {
-      const pending = JSON.parse(localStorage.getItem(STORAGE_PENDING_DRAFT) || "null");
-      if (!pending || !pending.text || !pending.createdAt) return null;
-      if (Date.now() - pending.createdAt > 15 * 60 * 1000) {
-        localStorage.removeItem(STORAGE_PENDING_DRAFT);
-        return null;
-      }
-      if (pending.url && noteKeyFromUrl(pending.url) !== noteKeyFromUrl(location.href)) return null;
-      return pending;
+      const localPending = JSON.parse(localStorage.getItem(STORAGE_PENDING_DRAFT) || "null");
+      if (shouldRemovePendingDraft(localPending)) localStorage.removeItem(STORAGE_PENDING_DRAFT);
+      const validLocal = validatePendingDraft(localPending);
+      if (validLocal) return validLocal;
     } catch {
+      localStorage.removeItem(STORAGE_PENDING_DRAFT);
+    }
+
+    const storedPending = await getExtensionStorage(STORAGE_PENDING_DRAFT);
+    if (shouldRemovePendingDraft(storedPending)) {
+      await removeExtensionStorage(STORAGE_PENDING_DRAFT);
       return null;
     }
+    const validStored = validatePendingDraft(storedPending);
+    return validStored;
+  }
+
+  function isLikelyNotePage() {
+    const key = noteKeyFromUrl(location.href);
+    return key.startsWith("note:");
+  }
+
+  async function waitForNotePageFromPending() {
+    const storedPending = await getExtensionStorage(STORAGE_PENDING_DRAFT);
+    if (!storedPending || !storedPending.text) return null;
+    if (shouldRemovePendingDraft(storedPending)) {
+      await removeExtensionStorage(STORAGE_PENDING_DRAFT);
+      return null;
+    }
+
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const valid = validatePendingDraft(storedPending);
+      if (valid) return valid;
+      await sleep(isLikelyNotePage() ? 250 : 350);
+    }
+    return null;
   }
 
   function isCommentInput(element) {
@@ -504,7 +591,7 @@
   }
 
   async function prefillPendingDraft() {
-    const pending = loadPendingDraft();
+    const pending = await loadPendingDraft() || await waitForNotePageFromPending();
     if (!pending) return;
 
     setStatus("检测到待填评论，正在查找评论框。不会自动发送。");
@@ -513,7 +600,7 @@
       if (input) {
         fillInput(input, pending.text);
         setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
-        localStorage.removeItem(STORAGE_PENDING_DRAFT);
+        await clearPendingDraft();
         return;
       }
       if (attempt === 3 || attempt === 9 || attempt === 18) clickCommentTrigger();
