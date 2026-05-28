@@ -22,6 +22,7 @@
     collecting: false,
     prefillRunning: false,
     prefillTimer: null,
+    prefillRetryTimer: null,
     pendingDraftCache: null,
     lastScanNewNotes: 0,
     lastScanMatches: 0
@@ -505,6 +506,7 @@
 
     const text = normalizeText([
       element.getAttribute("placeholder") || "",
+      element.getAttribute("data-placeholder") || "",
       element.getAttribute("aria-label") || "",
       element.getAttribute("role") || "",
       element.className || "",
@@ -514,7 +516,7 @@
 
     if (/搜索|search|私信|昵称|验证码|手机号|密码/i.test(text)) return false;
     if (/发布|发送|submit|send|搜索|search|私信|昵称|验证码|手机号|密码/i.test(text)) return false;
-    if (/评论|回复|comment|reply|说点|输入|互动|comment-input|reply-input|editor|contenteditable/i.test(text)) return true;
+    if (/评论|回复|comment|reply|说点|输入|互动|comment-input|reply-input|editor|content-edit|contenteditable/i.test(text)) return true;
     if (element.matches("textarea")) return true;
     if (element.matches("input")) return /comment|reply|input|editor/i.test(`${element.name || ""} ${element.id || ""} ${element.className || ""}`);
     return element.isContentEditable && rect.height >= 12;
@@ -527,14 +529,19 @@
       'input:not([type])',
       '[placeholder*="评论"]',
       '[placeholder*="说点"]',
+      '[data-placeholder*="评论"]',
+      '[data-placeholder*="说点"]',
       '[contenteditable="true"]',
       '[role="textbox"]',
       ".ProseMirror",
       ".ql-editor",
+      ".content-edit",
+      ".content-input",
       '[class*="comment"][contenteditable]',
       '[class*="reply"][contenteditable]',
       '[class*="input"][contenteditable]',
       '[class*="editor"][contenteditable]',
+      '[class*="content-edit"][contenteditable]',
       '[class*="comment-input"] [contenteditable]',
       '[class*="reply-input"] [contenteditable]'
     ];
@@ -549,6 +556,42 @@
       });
 
     return fields[0] || null;
+  }
+
+  function findCommentInputs() {
+    const selectors = [
+      "textarea",
+      'input[type="text"]',
+      'input:not([type])',
+      '[placeholder*="评论"]',
+      '[placeholder*="说点"]',
+      '[data-placeholder*="评论"]',
+      '[data-placeholder*="说点"]',
+      '[contenteditable="true"]',
+      '[role="textbox"]',
+      ".ProseMirror",
+      ".ql-editor",
+      ".content-edit",
+      ".content-input",
+      '[class*="comment"][contenteditable]',
+      '[class*="reply"][contenteditable]',
+      '[class*="input"][contenteditable]',
+      '[class*="editor"][contenteditable]',
+      '[class*="content-edit"][contenteditable]',
+      '[class*="comment-input"] [contenteditable]',
+      '[class*="reply-input"] [contenteditable]'
+    ];
+
+    return selectors
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .filter(isCommentInput)
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        const aBottomBonus = aRect.y > window.innerHeight * 0.45 ? 100000 : 0;
+        const bBottomBonus = bRect.y > window.innerHeight * 0.45 ? 100000 : 0;
+        return (bRect.width * bRect.height + bBottomBonus) - (aRect.width * aRect.height + aBottomBonus);
+      });
   }
 
   function visibleRect(element) {
@@ -570,6 +613,7 @@
       element.getAttribute("aria-label") || "",
       element.getAttribute("title") || "",
       element.getAttribute("placeholder") || "",
+      element.getAttribute("data-placeholder") || "",
       element.getAttribute("href") || "",
       element.getAttribute("role") || "",
       element.className || "",
@@ -700,14 +744,25 @@
     return true;
   }
 
-  function fillInput(element, text) {
-    element.focus();
+  function currentInputText(element) {
+    return "value" in element ? element.value : (element.innerText || element.textContent || "");
+  }
+
+  function focusInput(element) {
     element.scrollIntoView({ block: "center", behavior: "smooth" });
+    element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    element.click();
+    element.focus();
+  }
+
+  function fillInput(element, text) {
+    focusInput(element);
     if ("value" in element) {
       element.value = text;
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
-      return;
+      return currentInputText(element).includes(text.slice(0, Math.min(12, text.length)));
     }
 
     const selection = window.getSelection();
@@ -718,18 +773,20 @@
       selection.addRange(range);
     }
 
+    element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: text, inputType: "insertText" }));
     const inserted = document.execCommand?.("insertText", false, text);
     if (!inserted) element.textContent = text;
     element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+    return currentInputText(element).includes(text.slice(0, Math.min(12, text.length)));
   }
 
-  function copyTextToClipboard(text) {
-    try {
-      return navigator.clipboard.writeText(text);
-    } catch {
-      return Promise.resolve(false);
+  function fillFirstAvailableInput(text) {
+    const inputs = findCommentInputs();
+    for (const input of inputs) {
+      if (fillInput(input, text)) return true;
     }
+    return false;
   }
 
   async function getAnyPendingDraft() {
@@ -743,10 +800,11 @@
     if (!pending) return false;
 
     const active = document.activeElement;
-    const input = active && isCommentInput(active) ? active : findCommentInput();
-    if (!input) return false;
+    const filled = active && isCommentInput(active)
+      ? fillInput(active, pending.text)
+      : fillFirstAvailableInput(pending.text);
+    if (!filled) return false;
 
-    fillInput(input, pending.text);
     setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
     await clearPendingDraft();
     state.pendingDraftCache = null;
@@ -761,22 +819,18 @@
     state.prefillRunning = true;
     setStatus("检测到待填评论，正在查找评论框。不会自动发送。");
     try {
-      for (let attempt = 0; attempt < 44; attempt += 1) {
-        let input = findCommentInput();
-        if (input) {
-          fillInput(input, pending.text);
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        if (fillFirstAvailableInput(pending.text)) {
           setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
           await clearPendingDraft();
           state.pendingDraftCache = null;
           return;
         }
 
-        if (attempt === 0 || attempt % 3 === 0) {
+        if (attempt === 0 || attempt % 2 === 0) {
           clickCommentTrigger();
-          await sleep(220);
-          input = findCommentInput();
-          if (input) {
-            fillInput(input, pending.text);
+          await sleep(260);
+          if (fillFirstAvailableInput(pending.text)) {
             setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
             await clearPendingDraft();
             state.pendingDraftCache = null;
@@ -784,14 +838,14 @@
           }
         }
 
-        if (attempt === 6 || attempt === 14 || attempt === 24 || attempt === 34) {
-          window.scrollBy({ top: Math.max(window.innerHeight * 0.45, 360), behavior: "smooth" });
+        if (attempt === 6 || attempt === 14 || attempt === 24 || attempt === 34 || attempt === 52 || attempt === 70) {
+          window.scrollBy({ top: Math.max(window.innerHeight * 0.35, 280), behavior: "smooth" });
         }
         await sleep(500);
       }
 
-      await copyTextToClipboard(pending.text);
-      setStatus("评论框没自动展开，草稿已复制。你手动点一下评论框；插件会继续尝试预填，或直接 Ctrl+V。");
+      setStatus("还没找到可写评论框，插件会继续自动尝试展开并预填。");
+      schedulePrefillPendingDraft(1200);
     } finally {
       state.prefillRunning = false;
     }
