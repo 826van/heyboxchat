@@ -397,7 +397,7 @@
   function isCommentInput(element) {
     if (isInsideHelper(element)) return false;
     const rect = element.getBoundingClientRect();
-    if (rect.width < 120 || rect.height < 24) return false;
+    if (rect.width < 120 || rect.height < 16) return false;
 
     const text = [
       element.getAttribute("placeholder") || "",
@@ -407,14 +407,45 @@
     ].join(" ");
 
     if (/搜索|search|keyword|关键词/i.test(text)) return false;
-    if (/评论|回复|comment|reply|输入|说点/i.test(text)) return true;
-    return element.tagName === "TEXTAREA" || element.getAttribute("contenteditable") === "true";
+    if (/评论|回复|comment|reply|输入|说点|发一条/i.test(text)) return true;
+    if (element.matches('[contenteditable="true"], .ProseMirror, [role="textbox"]')) return true;
+    return element.tagName === "TEXTAREA";
   }
 
   function findCommentInput() {
     return [
-      ...document.querySelectorAll('textarea, [contenteditable="true"], input[type="text"], input:not([type])')
+      ...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"], .ProseMirror, input[type="text"], input:not([type])')
     ].find(isCommentInput) || null;
+  }
+
+  function isCommentTrigger(element) {
+    if (isInsideHelper(element)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 24 || rect.height < 18) return false;
+
+    const text = normalizeText([
+      element.innerText || element.textContent || "",
+      element.getAttribute("aria-label") || "",
+      element.getAttribute("title") || "",
+      element.className || ""
+    ].join(" "));
+
+    if (/搜索|search|分享|收藏|点赞/i.test(text)) return false;
+    return /评论|回复|comment|reply|说点|输入|我来说|参与讨论/i.test(text);
+  }
+
+  function findCommentTrigger() {
+    return [
+      ...document.querySelectorAll('button, [role="button"], a, div, span')
+    ].find(isCommentTrigger) || null;
+  }
+
+  function clickCommentTrigger() {
+    const trigger = findCommentTrigger();
+    if (!trigger) return false;
+    trigger.scrollIntoView({ block: "center", behavior: "smooth" });
+    trigger.click();
+    return true;
   }
 
   function fillInput(element, text) {
@@ -426,8 +457,18 @@
       return;
     }
 
-    element.textContent = text;
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    const inserted = document.execCommand?.("insertText", false, text);
+    if (!inserted) element.textContent = text;
     element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   async function prefillPendingDraft() {
@@ -435,7 +476,7 @@
     if (!pending) return;
 
     setStatus("检测到待填评论，正在查找评论框。不会自动发送。");
-    for (let attempt = 0; attempt < 24; attempt += 1) {
+    for (let attempt = 0; attempt < 36; attempt += 1) {
       const input = findCommentInput();
       if (input) {
         fillInput(input, pending.text);
@@ -443,7 +484,10 @@
         localStorage.removeItem(STORAGE_PENDING_DRAFT);
         return;
       }
-      if (attempt === 6) window.scrollBy({ top: Math.max(window.innerHeight * 0.75, 520), behavior: "smooth" });
+      if (attempt === 3 || attempt === 9 || attempt === 18) clickCommentTrigger();
+      if (attempt === 6 || attempt === 14 || attempt === 24) {
+        window.scrollBy({ top: Math.max(window.innerHeight * 0.75, 520), behavior: "smooth" });
+      }
       await sleep(500);
     }
 
