@@ -468,7 +468,7 @@
     }
 
     const searchUrl = new URL("/app/search", location.origin);
-    searchUrl.searchParams.set("keyword", keyword);
+    searchUrl.searchParams.set("q", keyword);
     window.open(searchUrl.href, "_blank", "noopener,noreferrer");
   }
 
@@ -478,7 +478,7 @@
 
   function getSearchKeywordFromUrl() {
     const params = new URLSearchParams(location.search);
-    return params.get("keyword") || params.get("q") || params.get("query") || "";
+    return params.get("q") || params.get("keyword") || params.get("query") || "";
   }
 
   function findSiteSearchInput() {
