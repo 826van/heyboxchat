@@ -6,11 +6,18 @@
 
 ## 安装
 
-1. 打开 Edge 的扩展管理页。
-2. 开启「开发人员模式」。
-3. 选择「加载解压缩的扩展」。
-4. 选择本目录：`xiaohongshu`。
-5. 打开 `https://www.xiaohongshu.com/explore`。
+1. 打开你平时使用的 Edge。
+2. 在地址栏输入 `edge://extensions/`，按回车。
+3. 打开「开发人员模式」。
+4. 点击「加载解压缩的扩展」。
+5. 在文件夹选择窗口里选择：`E:\edge插件\xiaohongshu`
+6. 点击「选择文件夹」。
+7. 扩展页出现 `Xiaohongshu Keyword Helper`，就说明加载成功。
+8. 打开 `https://www.xiaohongshu.com/explore`，页面右侧会出现插件面板。
+
+不要选择 `E:\edge插件` 总目录，也不要选择仓库根目录 `E:\heybox`。Edge 需要加载包含 `manifest.json` 的具体插件文件夹，也就是 `E:\edge插件\xiaohongshu`。
+
+如果你在常用 Edge 里看不到插件，说明它可能被加载到了另一个 Edge 配置文件或测试窗口里。请回到你平时使用的 Edge，重新打开 `edge://extensions/`，再加载一次上面的目录。
 
 更新代码后，需要回到 `edge://extensions/` 点一次插件卡片上的「重新加载」。这版为了实现真实自动填写，使用了 Edge 的 `debugger` 权限；如果 Edge 弹出权限确认，选择允许。
 
