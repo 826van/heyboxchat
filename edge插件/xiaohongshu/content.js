@@ -133,6 +133,31 @@
     });
   }
 
+  function extensionRuntimeAvailable() {
+    return Boolean(globalThis.chrome?.runtime?.sendMessage);
+  }
+
+  function sendRuntimeMessage(message) {
+    if (!extensionRuntimeAvailable()) {
+      return Promise.resolve({ ok: false, error: "Extension runtime is unavailable." });
+    }
+
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const error = chrome.runtime?.lastError;
+          if (error) {
+            resolve({ ok: false, error: error.message });
+            return;
+          }
+          resolve(response || { ok: false, error: "Empty extension response." });
+        });
+      } catch (error) {
+        resolve({ ok: false, error: String(error?.message || error) });
+      }
+    });
+  }
+
   function isInsideHelper(node) {
     return Boolean(node.closest?.(".xhs-keyword-helper-panel"));
   }
@@ -607,6 +632,16 @@
     return visible ? rect : null;
   }
 
+  function visibleCenterPoint(element) {
+    const rect = visibleRect(element);
+    if (!rect) return null;
+
+    return {
+      x: Math.min(Math.max(rect.left + rect.width / 2, 1), window.innerWidth - 1),
+      y: Math.min(Math.max(rect.top + rect.height / 2, 1), window.innerHeight - 1)
+    };
+  }
+
   function interactionText(element) {
     return normalizeText([
       element.innerText || element.textContent || "",
@@ -634,7 +669,10 @@
   function isForbiddenCommentTrigger(element) {
     const text = interactionText(element);
     const target = linkTarget(element);
-    if (target && target.origin !== location.origin) return true;
+    if (target) {
+      if (target.origin !== location.origin) return true;
+      if (target.pathname !== location.pathname) return true;
+    }
     if (/beian|mps\.gov|公安|备案|协议|隐私|帮助|举报|投诉|download|下载/i.test(text)) return true;
     if (/搜索|search|分享|收藏|点赞|关注|发布|发送|submit|send/i.test(text)) return true;
     return false;
@@ -719,50 +757,101 @@
       .map((item) => item.element);
   }
 
+  async function debuggerClickElement(element, options = {}) {
+    if (!options.allowInput && isForbiddenCommentTrigger(element)) return false;
+    const beforeOrigin = location.origin;
+    const beforePath = location.pathname;
+
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+    await sleep(80);
+
+    const point = visibleCenterPoint(element);
+    if (!point) return false;
+
+    const response = await sendRuntimeMessage({ type: "xhs-debugger-click", point });
+    await sleep(60);
+
+    if (location.origin !== beforeOrigin || location.pathname !== beforePath) {
+      history.back();
+      return false;
+    }
+
+    return Boolean(response?.ok);
+  }
+
+  async function debuggerInsertText(text) {
+    const response = await sendRuntimeMessage({ type: "xhs-debugger-insert-text", text });
+    return Boolean(response?.ok);
+  }
+
+  async function debuggerDetach() {
+    await sendRuntimeMessage({ type: "xhs-debugger-detach" });
+  }
+
   function dispatchClickSequence(element) {
     if (isForbiddenCommentTrigger(element)) return false;
     const beforeOrigin = location.origin;
-    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    const beforePath = location.pathname;
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
     for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
       element.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
     }
     element.click();
-    if (location.origin !== beforeOrigin) {
+    if (location.origin !== beforeOrigin || location.pathname !== beforePath) {
       history.back();
       return false;
     }
     return true;
   }
 
-  function clickCommentTrigger() {
-    const triggers = findCommentTriggers().slice(0, 3);
+  async function clickCommentTrigger() {
+    const triggers = findCommentTriggers().slice(0, 5);
     if (!triggers.length) return false;
     for (const trigger of triggers) {
+      if (await debuggerClickElement(trigger)) {
+        await sleep(320);
+        if (findCommentInput()) return true;
+      }
       if (!dispatchClickSequence(trigger)) continue;
+      await sleep(180);
       if (findCommentInput()) return true;
     }
-    return true;
+    return false;
   }
 
   function currentInputText(element) {
     return "value" in element ? element.value : (element.innerText || element.textContent || "");
   }
 
+  function draftSignature(text) {
+    const normalized = normalizeText(text);
+    return normalized.slice(0, Math.min(12, normalized.length));
+  }
+
+  function inputHasDraft(element, text) {
+    const signature = draftSignature(text);
+    if (!signature) return false;
+    return normalizeText(currentInputText(element)).includes(signature);
+  }
+
   function focusInput(element) {
-    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    element.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
     element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
     element.click();
-    element.focus();
+    element.focus({ preventScroll: true });
   }
 
-  function fillInput(element, text) {
-    focusInput(element);
+  function selectInputContents(element) {
     if ("value" in element) {
-      element.value = text;
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-      return currentInputText(element).includes(text.slice(0, Math.min(12, text.length)));
+      if (typeof element.select === "function") {
+        element.select();
+        return;
+      }
+      if (typeof element.setSelectionRange === "function") {
+        element.setSelectionRange(0, element.value.length);
+        return;
+      }
     }
 
     const selection = window.getSelection();
@@ -772,19 +861,81 @@
       selection.removeAllRanges();
       selection.addRange(range);
     }
-
-    element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: text, inputType: "insertText" }));
-    const inserted = document.execCommand?.("insertText", false, text);
-    if (!inserted) element.textContent = text;
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-    return currentInputText(element).includes(text.slice(0, Math.min(12, text.length)));
   }
 
-  function fillFirstAvailableInput(text) {
+  function dispatchTextInputEvent(element, type, text, cancelable = false) {
+    try {
+      element.dispatchEvent(new InputEvent(type, {
+        bubbles: true,
+        cancelable,
+        data: text,
+        inputType: "insertText"
+      }));
+    } catch {
+      element.dispatchEvent(new Event(type, { bubbles: true, cancelable }));
+    }
+  }
+
+  function dispatchInputEvents(element, text) {
+    dispatchTextInputEvent(element, "input", text);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setNativeValue(element, text) {
+    const prototype = element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (descriptor?.set) {
+      descriptor.set.call(element, text);
+    } else {
+      element.value = text;
+    }
+  }
+
+  function fillInputDirectly(element, text) {
+    focusInput(element);
+    if ("value" in element) {
+      setNativeValue(element, text);
+      dispatchInputEvents(element, text);
+      return inputHasDraft(element, text);
+    }
+
+    selectInputContents(element);
+    dispatchTextInputEvent(element, "beforeinput", text, true);
+    const inserted = document.execCommand?.("insertText", false, text);
+    if (!inserted) element.textContent = text;
+    dispatchInputEvents(element, text);
+    return inputHasDraft(element, text);
+  }
+
+  async function fillInputWithDebugger(element, text) {
+    focusInput(element);
+    if (!await debuggerClickElement(element, { allowInput: true })) return false;
+
+    await sleep(100);
+    const active = document.activeElement && isCommentInput(document.activeElement)
+      ? document.activeElement
+      : element;
+    selectInputContents(active);
+    await sleep(40);
+
+    if (!await debuggerInsertText(text)) return false;
+
+    dispatchInputEvents(active, text);
+    await sleep(140);
+    return inputHasDraft(active, text) || inputHasDraft(element, text);
+  }
+
+  async function fillInput(element, text) {
+    if (await fillInputWithDebugger(element, text)) return true;
+    return fillInputDirectly(element, text);
+  }
+
+  async function fillFirstAvailableInput(text) {
     const inputs = findCommentInputs();
     for (const input of inputs) {
-      if (fillInput(input, text)) return true;
+      if (await fillInput(input, text)) return true;
     }
     return false;
   }
@@ -799,16 +950,20 @@
     const pending = await getAnyPendingDraft();
     if (!pending) return false;
 
-    const active = document.activeElement;
-    const filled = active && isCommentInput(active)
-      ? fillInput(active, pending.text)
-      : fillFirstAvailableInput(pending.text);
-    if (!filled) return false;
+    try {
+      const active = document.activeElement;
+      const filled = active && isCommentInput(active)
+        ? await fillInput(active, pending.text)
+        : await fillFirstAvailableInput(pending.text);
+      if (!filled) return false;
 
-    setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
-    await clearPendingDraft();
-    state.pendingDraftCache = null;
-    return true;
+      setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
+      await clearPendingDraft();
+      state.pendingDraftCache = null;
+      return true;
+    } finally {
+      await debuggerDetach();
+    }
   }
 
   async function prefillPendingDraft() {
@@ -820,7 +975,7 @@
     setStatus("检测到待填评论，正在查找评论框。不会自动发送。");
     try {
       for (let attempt = 0; attempt < 90; attempt += 1) {
-        if (fillFirstAvailableInput(pending.text)) {
+        if (await fillFirstAvailableInput(pending.text)) {
           setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
           await clearPendingDraft();
           state.pendingDraftCache = null;
@@ -828,9 +983,9 @@
         }
 
         if (attempt === 0 || attempt % 2 === 0) {
-          clickCommentTrigger();
+          await clickCommentTrigger();
           await sleep(260);
-          if (fillFirstAvailableInput(pending.text)) {
+          if (await fillFirstAvailableInput(pending.text)) {
             setStatus("评论已预填。请检查内容，然后手动点击小红书的发布按钮。");
             await clearPendingDraft();
             state.pendingDraftCache = null;
@@ -847,6 +1002,7 @@
       setStatus("还没找到可写评论框，插件会继续自动尝试展开并预填。");
       schedulePrefillPendingDraft(1200);
     } finally {
+      await debuggerDetach();
       state.prefillRunning = false;
     }
   }

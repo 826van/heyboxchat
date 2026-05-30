@@ -4,8 +4,12 @@
   "version": "0.1.0",
   "description": "Find keyword-matching notes on xiaohongshu.com and prepare manual comment drafts.",
   "permissions": [
-    "storage"
+    "storage",
+    "debugger"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
